@@ -271,33 +271,45 @@ app.get('/api/tasks', authenticate, (req, res) => {
 });
 
 app.post('/api/tasks', authenticate, (req, res) => {
-    let { title, description, priority, due_date, project_id } = req.body;
+    const { title, description, priority, due_date, project_id } = req.body;
 
+    let formattedDate = null;
     if (due_date) {
-        due_date = `${due_date} 00:00:00`;
+        formattedDate = new Date(due_date)
+            .toISOString()
+            .slice(0, 19)
+            .replace('T', ' ');
     }
 
     fluxNexusHandler.query(
-        "INSERT INTO tasks (title, description, priority, due_date, project_id, created_by) VALUES (?, ?, ?, ?, ?, ?)",
-        [title, description, priority, due_date, project_id, req.user.id],
+        `INSERT INTO tasks 
+         (title, description, priority, due_date, project_id, status, created_by) 
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+            title,
+            description,
+            priority,
+            formattedDate,
+            project_id,
+            'todo',        // default status
+            req.user.id
+        ],
         (err, result) => {
-            if (err) {
-                console.error("Task Insert Error:", err);
-                return res.status(500).json({ error: "DB error" });
-            }
+            if (err) return res.status(500).json({ error: "DB error" });
 
             res.json({
                 id: result.insertId,
                 title,
                 description,
                 priority,
-                due_date,
+                due_date: formattedDate,
                 project_id,
-                status: "todo"
+                status: 'todo'
             });
         }
     );
 });
+
 
 
 app.put('/api/tasks/:id', authenticate, (req, res) => {
