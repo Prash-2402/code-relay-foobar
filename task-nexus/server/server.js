@@ -154,25 +154,21 @@ app.get('/api/auth/me', (req, res) => {
 
 /* ================= NOTIFICATIONS ================= */
 
-app.get('/api/notifications', (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ error: 'No token' });
+app.get('/api/init-db', (req, res) => {
+    const fs = require('fs');
+    const path = require('path');
 
-    try {
-        const decoded = jwt.verify(authHeader.split(' ')[1], JWT_SECRET);
+    const sql = fs.readFileSync(path.join(__dirname, 'database_mysql.sql')).toString();
 
-        fluxNexusHandler.query(
-            'SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50',
-            [decoded.id],
-            (err, results) => {
-                if (err) return res.status(500).json({ error: 'Database error' });
-                res.json(results);
-            }
-        );
-    } catch (error) {
-        res.status(401).json({ error: 'Invalid token' });
-    }
+    fluxNexusHandler.query(sql, (err) => {
+        if (err) {
+            console.error(err);
+            return res.status(500).json({ error: 'Failed to initialize DB' });
+        }
+        res.json({ message: 'Database initialized successfully' });
+    });
 });
+
 
 app.put('/api/notifications/:id/read', (req, res) => {
     const authHeader = req.headers.authorization;
