@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { FolderKanban, Plus, Trash2, ChevronRight, ArrowLeft } from 'lucide-react';
 
-const API_BASE = 'http://localhost:5000/api';
+import API_BASE from '../config';
 
 export default function Projects() {
     const { workspaceId } = useParams();
@@ -67,7 +67,7 @@ export default function Projects() {
         <div className="page fade-in">
             <div className="page-header">
                 <div>
-                    <button className="btn-ghost back-btn" onClick={() => navigate('/workspaces')}>
+                    <button className="btn-ghost back-btn" onClick={() => navigate('/dashboard/workspaces')}>
                         <ArrowLeft size={18} /> Back to Workspaces
                     </button>
                     <h2>{workspace?.name || 'Workspace'}</h2>
@@ -90,7 +90,7 @@ export default function Projects() {
 
             <div className="project-grid">
                 {projects.map(proj => (
-                    <div key={proj.id} className="project-card glass" onClick={() => navigate(`/projects/${proj.id}`)} style={{ borderLeft: `4px solid ${proj.color}` }}>
+                    <div key={proj.id} className="project-card glass" onClick={() => navigate(`/dashboard/projects/${proj.id}`)} style={{ borderLeft: `4px solid ${proj.color}` }}>
                         <div className="project-card-header">
                             <FolderKanban size={20} style={{ color: proj.color }} />
                             <button className="btn-icon-danger" onClick={(e) => { e.stopPropagation(); handleDelete(proj.id); }}>

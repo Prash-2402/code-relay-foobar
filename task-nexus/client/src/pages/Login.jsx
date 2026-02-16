@@ -12,14 +12,15 @@ function Login() {
     const navigate = useNavigate();
 
     const handleSubmit = async (e) => {
+        e.preventDefault();
         setError('');
         setLoading(true);
 
         try {
             await login(email, password);
-            navigate('/');
+            navigate('/dashboard');
         } catch (err) {
-            setError(err.data?.error || 'Login failed');
+            setError(err.response?.data?.error || 'Login failed');
         } finally {
             setLoading(false);
         }
@@ -89,4 +90,4 @@ function Login() {
     );
 }
 
-export { Login };
+export default Login;

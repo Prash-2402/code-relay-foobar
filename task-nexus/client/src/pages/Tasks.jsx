@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Plus, Trash2, ArrowLeft, Calendar, Flag, Check, Clock, Eye, ListTodo } from 'lucide-react';
+import { Plus, Trash2, ArrowLeft, Calendar, Flag, Check, Clock, Eye, ListTodo, RotateCcw, CheckCircle2 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:5000/api';
+import API_BASE from '../config';
 const STATUSES = ['todo', 'in_progress', 'review', 'done'];
 const statusLabels = { todo: 'To Do', in_progress: 'In Progress', review: 'Review', done: 'Done' };
 const statusIcons = { todo: ListTodo, in_progress: Clock, review: Eye, done: Check };
@@ -49,7 +49,7 @@ export default function Tasks() {
                 project_id: parseInt(projectId),
             }, { headers: { Authorization: `Bearer ${token}` } });
 
-            setTasks([...tasks, response.data]);
+            setTasks(prevTasks => [...prevTasks, response.data]);
             setTitle('');
             setDescription('');
             setShowForm(false);
@@ -66,7 +66,7 @@ export default function Tasks() {
                 completed: newStatus === 'done',
             }, { headers: { Authorization: `Bearer ${token}` } });
 
-            setTasks(tasks.map(t =>
+            setTasks(prevTasks => prevTasks.map(t =>
                 t.id === taskId ? { ...t, status: newStatus, completed: newStatus === 'done' } : t
             ));
         } catch (err) {
@@ -78,7 +78,7 @@ export default function Tasks() {
         const token = localStorage.getItem('nexus_token');
         try {
             await axios.delete(`${API_BASE}/tasks/${id}`, { headers: { Authorization: `Bearer ${token}` } });
-            setTasks(tasks.filter(t => t.id !== id));
+            setTasks(prevTasks => prevTasks.filter(t => t.id !== id));
         } catch (err) {
             console.error(err);
         }
@@ -129,7 +129,17 @@ export default function Tasks() {
                         </div>
                         <div className="form-group">
                             <label><Calendar size={14} /> Due Date</label>
-                            <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+                            <div className="date-input-group">
+                                <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="styled-date-input" />
+                                <div className="quick-dates">
+                                    <button type="button" className="badge-btn" onClick={() => setDueDate(new Date().toISOString().split('T')[0])}>Today</button>
+                                    <button type="button" className="badge-btn" onClick={() => {
+                                        const tmr = new Date();
+                                        tmr.setDate(tmr.getDate() + 1);
+                                        setDueDate(tmr.toISOString().split('T')[0]);
+                                    }}>Tmrw</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div className="form-actions">
@@ -159,10 +169,23 @@ export default function Tasks() {
                                             </div>
                                             <h4>{task.title}</h4>
                                             <div className="task-card-footer">
-                                                {task.due_date && <span className="task-due"><Calendar size={12} />{new Date(task.due_date).toLocaleDateString()}</span>}
-                                                <select value={task.status} onChange={(e) => handleStatusChange(task.id, e.target.value)} className="status-select">
-                                                    {STATUSES.map(s => <option key={s} value={s}>{statusLabels[s]}</option>)}
-                                                </select>
+                                                <div className="task-date-display">
+                                                    {task.due_date && <span className="task-due"><Calendar size={12} />{new Date(task.due_date).toLocaleDateString()}</span>}
+                                                </div>
+                                                <div className="task-actions">
+                                                    {task.status === 'done' ? (
+                                                        <button className="btn-icon-sm text-success" onClick={() => handleStatusChange(task.id, 'todo')} title="Undo">
+                                                            <RotateCcw size={16} />
+                                                        </button>
+                                                    ) : (
+                                                        <button className="btn-icon-sm" onClick={() => handleStatusChange(task.id, 'done')} title="Mark as Done">
+                                                            <CheckCircle2 size={16} />
+                                                        </button>
+                                                    )}
+                                                    <select value={task.status} onChange={(e) => handleStatusChange(task.id, e.target.value)} className="status-select">
+                                                        {STATUSES.map(s => <option key={s} value={s}>{statusLabels[s]}</option>)}
+                                                    </select>
+                                                </div>
                                             </div>
                                         </div>
                                     ))}

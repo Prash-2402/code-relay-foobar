@@ -1,30 +1,42 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 :root {
-    /* Light Mode Palette */
-    --primary: 220 100% 50%;
-    --primary-hover: 220 100% 45%;
-    --primary-rgb: 37, 99, 235;
-    --bg: 210 40% 98%;
-    --bg-secondary: 210 40% 96%;
+    /* Light Mode Palette - Premium/Clean */
+    --primary: 250 100% 65%;
+    /* Vibrant Purple */
+    --primary-hover: 250 100% 60%;
+    --primary-rgb: 124, 58, 237;
+
+    --bg: 240 20% 99%;
+    /* Soft White */
+    --bg-secondary: 240 20% 97%;
+
     --card: 0 0% 100%;
-    --card-hover: 210 40% 99%;
-    --text: 222 47% 11%;
-    --text-muted: 215 16% 47%;
-    --border: 214 32% 91%;
-    --success: 142 76% 36%;
+    --card-border: 240 5.9% 90%;
+
+    --text: 240 10% 3.9%;
+    --text-muted: 240 3.8% 46.1%;
+
+    --border: 240 5.9% 90%;
+
+    --success: 142 70% 45%;
     --warning: 38 92% 50%;
     --danger: 0 84% 60%;
-    --purple: 258 90% 66%;
-    --cyan: 188 95% 40%;
-    --glass: rgba(255, 255, 255, 0.75);
-    --glass-border: rgba(0, 0, 0, 0.08);
+
+    /* Effects */
+    --glass: rgba(255, 255, 255, 0.6);
+    --glass-border: rgba(255, 255, 255, 0.4);
     --glass-hover: rgba(0, 0, 0, 0.04);
 
-    --sidebar-width: 260px;
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+
     --radius: 0.75rem;
     --radius-lg: 1rem;
-    --radius-xl: 1.25rem;
+    --radius-xl: 1.5rem;
+
+    --sidebar-width: 280px;
 
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     line-height: 1.5;
@@ -32,17 +44,43 @@
     background-color: hsl(var(--bg));
 }
 
+.dark {
+    /* Dark Mode Palette - Deep Space/Cyber */
+    --primary: 250 100% 70%;
+    --primary-hover: 250 100% 75%;
+    --primary-rgb: 139, 92, 246;
+
+    --bg: 240 10% 3.9%;
+    /* Deep Gray/Black */
+    --bg-secondary: 240 5% 7%;
+
+    --card: 240 10% 7%;
+    --card-border: 240 3.7% 15.9%;
+
+    --text: 0 0% 98%;
+    --text-muted: 240 5% 64.9%;
+
+    --border: 240 3.7% 15.9%;
+
+    --glass: rgba(20, 20, 25, 0.7);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --glass-hover: rgba(255, 255, 255, 0.05);
+}
+
 * {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
+    transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
 body {
     min-height: 100vh;
-    background-image:
-        radial-gradient(circle at 0% 0%, hsla(220, 100%, 85%, 0.3) 0%, transparent 50%),
-        radial-gradient(circle at 100% 100%, hsla(280, 100%, 85%, 0.3) 0%, transparent 50%);
+    background:
+        radial-gradient(circle at 10% 0%, hsla(var(--primary), 0.15) 0%, transparent 40%),
+        radial-gradient(circle at 90% 90%, hsla(280, 100%, 70%, 0.1) 0%, transparent 40%),
+        hsl(var(--bg));
+    background-attachment: fixed;
 }
 
 #root {
@@ -1133,4 +1171,59 @@ select {
     .page-header {
         flex-direction: column;
     }
+}
+
+/* Quick Date Buttons */
+.date-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.quick-dates {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.badge-btn {
+    padding: 0.25rem 0.75rem;
+    border-radius: 2rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-hover);
+    color: hsl(var(--text-muted));
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.badge-btn:hover {
+    background: hsla(var(--primary), 0.1);
+    color: hsl(var(--primary));
+    border-color: hsla(var(--primary), 0.3);
+}
+
+/* Task Actions */
+.task-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--glass-border);
+}
+
+.task-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.text-success {
+    color: hsl(var(--success));
+}
+
+.text-success:hover {
+    background: hsla(var(--success), 0.1);
+    color: hsl(var(--success));
 }

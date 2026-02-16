@@ -1,21 +1,20 @@
 require('dotenv').config();
 const express = require('express');
-
-const mysql = require('mysql2');
-
+const cors = require('cors');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
 
 const app = express();
+
+app.use(cors({
+    origin: process.env.CORS_ORIGIN || '*',
+    credentials: true
+}));
 app.use(express.json());
 
 const JWT_SECRET = 'super-secret-key-123';
 
-const fluxNexusHandler = mysql.createConnection({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME
-});
+const fluxNexusHandler = require('./database_mysql');
 
 fluxNexusHandler.connect((err) => {
     if (err) {
@@ -25,70 +24,106 @@ fluxNexusHandler.connect((err) => {
     console.log('Successfully connected to taskNexus stability layer.');
 });
 
-app.post('/api/auth/register', (req, res) => {
+/* ================= AUTH ================= */
+
+// REGISTER
+app.post('/api/auth/register', async (req, res) => {
     const { username, email, password } = req.body;
 
-    const query = "INSERT INTO users (username, email, password_hash) VALUES ('" + username + "', '" + email + "', '" + password + "')";
+    if (!username || !email || !password) {
+        return res.status(400).json({ error: 'All fields are required' });
+    }
 
-    fluxNexusHandler.query(query, (err, results) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
+    try {
+        // Hash the password
+        const saltRounds = 10;
+        const password_hash = await bcrypt.hash(password, saltRounds);
 
-        const wsQuery = "INSERT INTO workspaces (name, description, owner_id) VALUES ('" + username + " Workspace', 'Default workspace', " + results.insertId + ")";
-        fluxNexusHandler.query(wsQuery, (err2, wsResults) => {
-            if (wsResults) {
-                fluxNexusHandler.query(
-                    "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (" + wsResults.insertId + ", " + results.insertId + ", 'owner')"
-                );
+        const query = "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)";
 
-                fluxNexusHandler.query(
-                    "INSERT INTO projects (name, description, workspace_id) VALUES ('My First Project', 'Default project', " + wsResults.insertId + ")"
-                );
+        fluxNexusHandler.query(query, [username, email, password_hash], (err, results) => {
+            if (err) {
+                return res.status(400).json({ error: 'User already exists or invalid data' });
+            }
+
+            const userId = results.insertId;
+
+            fluxNexusHandler.query(
+                "INSERT INTO workspaces (name, description, owner_id) VALUES (?, ?, ?)",
+                [`${username} Workspace`, 'Default workspace', userId],
+                (err2, wsResults) => {
+                    if (wsResults) {
+                        fluxNexusHandler.query(
+                            "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, ?)",
+                            [wsResults.insertId, userId, 'owner']
+                        );
+
+                        fluxNexusHandler.query(
+                            "INSERT INTO projects (name, description, workspace_id) VALUES (?, ?, ?)",
+                            ['My First Project', 'Default project', wsResults.insertId]
+                        );
+                    }
+
+                    const token = jwt.sign(
+                        { id: userId, username, email },
+                        JWT_SECRET
+                    );
+
+                    res.json({ token, user: { id: userId, username, email } });
+                }
+            );
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Error creating user' });
+    }
+});
+
+// LOGIN
+app.post('/api/auth/login', async (req, res) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password required' });
+    }
+
+    const query = "SELECT * FROM users WHERE email = ?";
+
+    fluxNexusHandler.query(query, [email], async (err, results) => {
+        try {
+            if (err) {
+                return res.status(500).json({ error: 'Database error' });
+            }
+
+            if (!results || results.length === 0) {
+                return res.status(401).json({ error: 'No account found with this email' });
+            }
+
+            const user = results[0];
+
+            // Compare hashed password
+            const passwordMatch = await bcrypt.compare(password, user.password_hash);
+
+            if (!passwordMatch) {
+                return res.status(401).json({ error: 'Wrong password' });
             }
 
             const token = jwt.sign(
-                { id: results.insertId, username, email },
+                { id: user.id, username: user.username, email: user.email },
                 JWT_SECRET
             );
 
-            res.json({ token, user: { id: results.insertId, username, email } });
-        });
+            res.json({
+                token,
+                user: { id: user.id, username: user.username, email: user.email }
+            });
+        } catch (error) {
+            console.error('Error during login:', error);
+            res.status(500).json({ error: 'Error during login' });
+        }
     });
 });
 
-app.post('/api/auth/login', (req, res) => {
-    const { email, password } = req.body;
-
-    const query = "SELECT * FROM users WHERE email = '" + email + "'";
-
-    fluxNexusHandler.query(query, (err, results) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
-
-        if (results.length === 0) {
-            return res.status(401).json({ error: 'No account found with this email' });
-        }
-
-        var user = results[0];
-
-        if (user.password_hash !== password) {
-            return res.status(401).json({ error: 'Wrong password' });
-        }
-
-        const token = jwt.sign(
-            { id: user.id, username: user.username, email: user.email },
-            JWT_SECRET
-        );
-
-        res.json({
-            token,
-            user: { id: user.id, username: user.username, email: user.email }
-        });
-    });
-});
-
+// VERIFY TOKEN
 app.get('/api/auth/me', (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader) {
@@ -99,278 +134,390 @@ app.get('/api/auth/me', (req, res) => {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, JWT_SECRET);
 
-        fluxNexusHandler.query('SELECT id, username, email FROM users WHERE id = ?', [decoded.id], (err, results) => {
-            if (err) throw err;
-            res.json(results[0]);
-        });
+        fluxNexusHandler.query(
+            'SELECT id, username, email FROM users WHERE id = ?',
+            [decoded.id],
+            (err, results) => {
+                if (err) return res.status(500).json({ error: 'Database error' });
+                res.json(results[0]);
+            }
+        );
     } catch (error) {
         res.status(401).json({ error: 'Invalid token' });
     }
 });
 
-app.get('/api/workspaces', (req, res) => {
+// ANALYTICS
+app.get('/api/analytics/dashboard', (req, res) => {
     const authHeader = req.headers.authorization;
-    let userId = 1;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
 
     try {
-        if (authHeader) {
-            const decoded = jwt.verify(authHeader.split(' ')[1], JWT_SECRET);
-            userId = decoded.id;
-        }
-    } catch (e) { }
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const userId = decoded.id;
+
+        // Parallel queries for stats
+        const queries = {
+            totalTasks: "SELECT COUNT(*) as count FROM tasks WHERE created_by = ?",
+            completedTasks: "SELECT COUNT(*) as count FROM tasks WHERE created_by = ? AND status = 'done'",
+            inProgressTasks: "SELECT COUNT(*) as count FROM tasks WHERE created_by = ? AND status = 'in_progress'",
+            overdueTasks: "SELECT COUNT(*) as count FROM tasks WHERE created_by = ? AND due_date < NOW() AND status != 'done'",
+            totalProjects: "SELECT COUNT(*) as count FROM projects WHERE workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = ?)",
+            totalWorkspaces: "SELECT COUNT(*) as count FROM workspace_members WHERE user_id = ?",
+            tasksByStatus: "SELECT status, COUNT(*) as count FROM tasks WHERE created_by = ? GROUP BY status",
+            tasksByPriority: "SELECT priority, COUNT(*) as count FROM tasks WHERE created_by = ? GROUP BY priority"
+        };
+
+        const stats = {};
+        let completedQueries = 0;
+        const totalQueries = Object.keys(queries).length;
+
+        Object.entries(queries).forEach(([key, sql]) => {
+            fluxNexusHandler.query(sql, [userId], (err, results) => {
+                if (err) {
+                    console.error(`Error fetching ${key}:`, err);
+                    stats[key] = key.includes('By') ? [] : 0;
+                } else {
+                    if (key.includes('By')) {
+                        stats[key] = results;
+                    } else {
+                        stats[key] = results[0]?.count || 0;
+                    }
+                }
+
+                completedQueries++;
+                if (completedQueries === totalQueries) {
+                    res.json(stats);
+                }
+            });
+        });
+
+    } catch (error) {
+        res.status(401).json({ error: 'Invalid token' });
+    }
+});
+
+// LIST MEMBERS
+app.get('/api/workspaces/:id/members', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
 
     fluxNexusHandler.query(
-        `SELECT w.*, wm.role 
-         FROM workspaces w
-         JOIN workspace_members wm ON w.id = wm.workspace_id
-         WHERE wm.user_id = ?
-         ORDER BY w.created_at DESC`,
-        [userId],
+        `SELECT u.id, u.username, u.email, wm.role 
+         FROM workspace_members wm 
+         JOIN users u ON wm.user_id = u.id 
+         WHERE wm.workspace_id = ?`,
+        [req.params.id],
         (err, results) => {
-            if (err) {
-                return res.status(500).send('Nexus error');
-            }
+            if (err) return res.status(500).json({ error: 'Database error' });
             res.json(results);
         }
     );
 });
 
+// INVITE MEMBER
+app.post('/api/workspaces/:id/invite', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
+
+    const { email } = req.body;
+    const workspaceId = req.params.id;
+
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+
+    // 1. Find user by email
+    fluxNexusHandler.query('SELECT id FROM users WHERE email = ?', [email], (err, users) => {
+        if (err) return res.status(500).json({ error: 'Database error' });
+        if (users.length === 0) return res.status(404).json({ error: 'User not found' });
+
+        const userId = users[0].id;
+
+        // 2. Check if already member
+        fluxNexusHandler.query(
+            'SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?',
+            [workspaceId, userId],
+            (err2, existing) => {
+                if (err2) return res.status(500).json({ error: 'Database error' });
+                if (existing.length > 0) return res.status(400).json({ error: 'User already in workspace' });
+
+                // 3. Add member
+                fluxNexusHandler.query(
+                    'INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, ?)',
+                    [workspaceId, userId, 'member'],
+                    (err3, result) => {
+                        if (err3) return res.status(500).json({ error: 'Failed to add member' });
+                        res.json({ message: 'Member added successfully', userId });
+                    }
+                );
+            }
+        );
+    });
+});
+
+/* ================= WORKSPACES ================= */
+
+// GET WORKSPACES
+app.get('/api/workspaces', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
+
+    try {
+        const decoded = jwt.verify(authHeader.split(' ')[1], JWT_SECRET);
+        fluxNexusHandler.query(
+            `SELECT w.*, wm.role 
+             FROM workspaces w 
+             JOIN workspace_members wm ON w.id = wm.workspace_id 
+             WHERE wm.user_id = ?`,
+            [decoded.id],
+            (err, results) => {
+                if (err) return res.status(500).json({ error: 'Database error' });
+                res.json(results);
+            }
+        );
+    } catch (e) { res.status(401).json({ error: 'Invalid token' }); }
+});
+
+// GET SINGLE WORKSPACE
 app.get('/api/workspaces/:id', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
+
     fluxNexusHandler.query(
         'SELECT * FROM workspaces WHERE id = ?',
         [req.params.id],
         (err, results) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            if (results.length === 0) return res.status(404).json({ error: 'Workspace not found' });
             res.json(results[0]);
         }
     );
 });
 
+// CREATE WORKSPACE
 app.post('/api/workspaces', (req, res) => {
-    const { name, description } = req.body;
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
 
-    let userId = 1;
     try {
-        const token = req.headers.authorization?.split(' ')[1];
-        if (token) {
-            userId = jwt.verify(token, JWT_SECRET).id;
-        }
-    } catch (e) { }
-
-    const query = "INSERT INTO workspaces (name, description, owner_id) VALUES ('" + name + "', '" + description + "', " + userId + ")";
-
-    fluxNexusHandler.query(query, (err, results) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
+        const decoded = jwt.verify(authHeader.split(' ')[1], JWT_SECRET);
+        const { name, description } = req.body;
 
         fluxNexusHandler.query(
-            "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (" + results.insertId + ", " + userId + ", 'owner')"
+            'INSERT INTO workspaces (name, description, owner_id) VALUES (?, ?, ?)',
+            [name, description, decoded.id],
+            (err, result) => {
+                if (err) return res.status(500).json({ error: 'Database error' });
+                const workspaceId = result.insertId;
+
+                // Add owner as member
+                fluxNexusHandler.query(
+                    'INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, ?)',
+                    [workspaceId, decoded.id, 'owner'],
+                    (err2) => {
+                        if (err2) return res.status(500).json({ error: 'Failed to add member' });
+                        res.json({ id: workspaceId, name, description, role: 'owner' });
+                    }
+                );
+            }
         );
-
-        res.json({ id: results.insertId, name, description, owner_id: userId, role: 'owner' });
-    });
+    } catch (e) { res.status(401).json({ error: 'Invalid token' }); }
 });
 
+// DELETE WORKSPACE
 app.delete('/api/workspaces/:id', (req, res) => {
-    fluxNexusHandler.query('DELETE FROM workspaces WHERE id = ?', [req.params.id], (err, results) => {
-        if (err) throw err;
-        res.json({ message: 'Workspace purged from nexus' });
-    });
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
+
+    fluxNexusHandler.query(
+        'DELETE FROM workspaces WHERE id = ?', // Cascading delete handles related data
+        [req.params.id],
+        (err) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json({ success: true });
+        }
+    );
 });
 
-app.get('/api/workspaces/:id/members', (req, res) => {
+/* ================= PROJECTS ================= */
+
+// GET PROJECTS FOR WORKSPACE
+app.get('/api/projects/workspace/:workspaceId', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
+
     fluxNexusHandler.query(
-        `SELECT u.id, u.username, u.email, wm.role FROM workspace_members wm JOIN users u ON wm.user_id = u.id WHERE wm.workspace_id = ?`,
-        [req.params.id],
+        `SELECT p.*, 
+        (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id) as task_count,
+        (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.status = 'done') as completed_count
+        FROM projects p WHERE workspace_id = ?`,
+        [req.params.workspaceId],
         (err, results) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
             res.json(results);
         }
     );
 });
 
-app.get('/api/projects/workspace/:workspaceId', (req, res) => {
+// GET SINGLE PROJECT
+app.get('/api/projects/:id', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
+
     fluxNexusHandler.query(
-        'SELECT * FROM projects WHERE workspace_id = ? ORDER BY created_at DESC',
-        [req.params.workspaceId],
-        (err, projects) => {
-            if (err) return res.status(500).send('Error');
-
-            if (projects.length === 0) return res.json([]);
-
-            let completed = 0;
-            projects.forEach((project, index) => {
-                fluxNexusHandler.query(
-                    'SELECT COUNT(*) as task_count, SUM(CASE WHEN status = "done" THEN 1 ELSE 0 END) as completed_count FROM tasks WHERE project_id = ?',
-                    [project.id],
-                    (err2, counts) => {
-                        projects[index].task_count = counts ? counts[0].task_count : 0;
-                        projects[index].completed_count = counts ? counts[0].completed_count : 0;
-                        completed++;
-                        if (completed === projects.length) {
-                            res.json(projects);
-                        }
-                    }
-                );
-            });
+        'SELECT * FROM projects WHERE id = ?',
+        [req.params.id],
+        (err, results) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            if (results.length === 0) return res.status(404).json({ error: 'Project not found' });
+            res.json(results[0]);
         }
     );
 });
 
-app.get('/api/projects/:id', (req, res) => {
-    fluxNexusHandler.query('SELECT * FROM projects WHERE id = ?', [req.params.id], (err, results) => {
-        res.json(results[0]);
-    });
-});
-
+// CREATE PROJECT
 app.post('/api/projects', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
+
     const { name, description, color, workspaceId } = req.body;
 
-    const query = "INSERT INTO projects (name, description, color, workspace_id) VALUES ('" + name + "', '" + description + "', '" + (color || '#3B82F6') + "', " + workspaceId + ")";
-
-    fluxNexusHandler.query(query, (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ id: results.insertId, name, description, color: color || '#3B82F6', workspace_id: workspaceId, task_count: 0, completed_count: 0 });
-    });
-});
-
-app.delete('/api/projects/:id', (req, res) => {
-    fluxNexusHandler.query('DELETE FROM projects WHERE id = ?', [req.params.id], (err) => {
-        if (err) throw err;
-        res.json({ message: 'Project purged' });
-    });
-});
-
-app.get('/api/tasks', (req, res) => {
-    const { projectId } = req.query;
-    let query = 'SELECT t.*, u.username as assignee_name FROM tasks t LEFT JOIN users u ON t.assignee_id = u.id';
-
-    if (projectId) {
-        query += " WHERE t.project_id = " + projectId;
-    }
-
-    query += ' ORDER BY t.created_at DESC';
-
-    fluxNexusHandler.query(query, (err, results) => {
-        res.json(results);
-    });
-});
-
-app.post('/api/tasks', (req, res) => {
-    const { title, description, status, priority, due_date, project_id } = req.body;
-
-    let userId = 1;
-    try {
-        const token = req.headers.authorization?.split(' ')[1];
-        if (token) userId = jwt.verify(token, JWT_SECRET).id;
-    } catch (e) { }
-
-    const query = "INSERT INTO tasks (title, description, status, priority, due_date, project_id, created_by) VALUES ('" + title + "', '" + (description || '') + "', '" + (status || 'todo') + "', '" + (priority || 'medium') + "', " + (due_date ? "'" + due_date + "'" : 'NULL') + ", " + project_id + ", " + userId + ")";
-
-    fluxNexusHandler.query(query, (err, results) => {
-        if (err) {
-            console.error(err);
-            return res.status(500).send('Nexus error');
-        }
-        res.json({ id: results.insertId, title, description: description || '', status: status || 'todo', priority: priority || 'medium', due_date, project_id, created_by: userId, completed: false });
-    });
-});
-
-app.put('/api/tasks/:id', (req, res) => {
-    const { id } = req.params;
-    const { title, description, status, priority, due_date, assignee_id, completed } = req.body;
-
-    var fields = [];
-    var values = [];
-
-    if (title !== undefined) { fields.push('title = ?'); values.push(title); }
-    if (description !== undefined) { fields.push('description = ?'); values.push(description); }
-    if (status !== undefined) { fields.push('status = ?'); values.push(status); }
-    if (priority !== undefined) { fields.push('priority = ?'); values.push(priority); }
-    if (due_date !== undefined) { fields.push('due_date = ?'); values.push(due_date); }
-    if (completed !== undefined) {
-        fields.push('completed = ?');
-        values.push(completed);
-        if (completed) fields.push("status = 'done'");
-    }
-
-    values.push(id);
-    var updateQuery = `UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`;
-    fluxNexusHandler.query(updateQuery, values, function (err, results) {
-        if (err) throw err;
-        res.json({ success: true });
-    });
-});
-
-app.delete('/api/tasks/:id', (req, res) => {
-    const id = req.params.id;
-    fluxNexusHandler.query('DELETE FROM tasks WHERE id = ?', [id], (err, results) => {
-        if (err) {
-            return res.status(500).json({ error: 'Failed to delete' });
-        }
-        res.json({ message: 'Task purged from nexus' });
-    });
-});
-
-app.get('/api/analytics/dashboard', (req, res) => {
-    let userId = 1;
-    try {
-        const token = req.headers.authorization?.split(' ')[1];
-        if (token) userId = jwt.verify(token, JWT_SECRET).id;
-    } catch (e) { }
-
     fluxNexusHandler.query(
-        'SELECT w.id FROM workspaces w JOIN workspace_members wm ON w.id = wm.workspace_id WHERE wm.user_id = ?',
-        [userId],
-        (err, workspaces) => {
-            if (err || !workspaces || workspaces.length === 0) {
-                return res.json({ totalTasks: 0, completedTasks: 0, inProgressTasks: 0, overdueTasks: 0, totalProjects: 0, totalWorkspaces: 0, recentActivity: [], tasksByStatus: [], tasksByPriority: [] });
-            }
-
-            const wsIds = workspaces.map(w => w.id);
-            const placeholders = wsIds.map(() => '?').join(',');
-
-            fluxNexusHandler.query(
-                `SELECT COUNT(*) as totalTasks,
-                    SUM(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) as completedTasks,
-                    SUM(CASE WHEN t.status = 'in_progress' THEN 1 ELSE 0 END) as inProgressTasks,
-                    SUM(CASE WHEN t.due_date < NOW() AND t.status != 'done' THEN 1 ELSE 0 END) as overdueTasks
-                 FROM tasks t JOIN projects p ON t.project_id = p.id WHERE p.workspace_id IN (${placeholders})`,
-                wsIds,
-                (err2, stats) => {
-                    fluxNexusHandler.query(
-                        `SELECT COUNT(*) as totalProjects FROM projects WHERE workspace_id IN (${placeholders})`,
-                        wsIds,
-                        (err3, projStats) => {
-                            fluxNexusHandler.query(
-                                `SELECT t.status, COUNT(*) as count FROM tasks t JOIN projects p ON t.project_id = p.id WHERE p.workspace_id IN (${placeholders}) GROUP BY t.status`,
-                                wsIds,
-                                (err4, byStatus) => {
-                                    fluxNexusHandler.query(
-                                        `SELECT t.priority, COUNT(*) as count FROM tasks t JOIN projects p ON t.project_id = p.id WHERE p.workspace_id IN (${placeholders}) GROUP BY t.priority`,
-                                        wsIds,
-                                        (err5, byPriority) => {
-                                            res.json({
-                                                totalTasks: stats[0]?.totalTasks || 0,
-                                                completedTasks: stats[0]?.completedTasks || 0,
-                                                inProgressTasks: stats[0]?.inProgressTasks || 0,
-                                                overdueTasks: stats[0]?.overdueTasks || 0,
-                                                totalProjects: projStats[0]?.totalProjects || 0,
-                                                totalWorkspaces: wsIds.length,
-                                                recentActivity: [],
-                                                tasksByStatus: byStatus || [],
-                                                tasksByPriority: byPriority || [],
-                                            });
-                                        }
-                                    );
-                                }
-                            );
-                        }
-                    );
-                }
-            );
+        'INSERT INTO projects (name, description, color, workspace_id) VALUES (?, ?, ?, ?)',
+        [name, description, color, workspaceId],
+        (err, result) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json({ id: result.insertId, name, description, color, workspace_id: workspaceId, task_count: 0, completed_count: 0 });
         }
     );
 });
+
+// DELETE PROJECT
+app.delete('/api/projects/:id', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
+
+    fluxNexusHandler.query(
+        'DELETE FROM projects WHERE id = ?',
+        [req.params.id],
+        (err) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json({ success: true });
+        }
+    );
+});
+
+/* ================= TASKS ================= */
+
+// GET TASKS
+app.get('/api/tasks', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
+
+    const { projectId } = req.query;
+
+    fluxNexusHandler.query(
+        'SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at DESC',
+        [projectId],
+        (err, results) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json(results);
+        }
+    );
+});
+
+// CREATE TASK
+app.post('/api/tasks', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
+
+    try {
+        const decoded = jwt.verify(authHeader.split(' ')[1], JWT_SECRET);
+        const { title, description, priority, due_date, project_id } = req.body;
+
+        fluxNexusHandler.query(
+            'INSERT INTO tasks (title, description, priority, due_date, project_id, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+            [title, description, priority, due_date, project_id, decoded.id],
+            (err, result) => {
+                if (err) return res.status(500).json({ error: 'Database error' });
+                res.json({
+                    id: result.insertId, title, description, priority, due_date, project_id, status: 'todo'
+                });
+            }
+        );
+    } catch (e) { res.status(401).json({ error: 'Invalid token' }); }
+});
+
+// UPDATE TASK
+app.put('/api/tasks/:id', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
+
+    const { status } = req.body;
+
+    fluxNexusHandler.query(
+        'UPDATE tasks SET status = ? WHERE id = ?',
+        [status, req.params.id],
+        (err) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json({ success: true });
+        }
+    );
+});
+
+// DELETE TASK
+app.delete('/api/tasks/:id', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
+
+    fluxNexusHandler.query(
+        'DELETE FROM tasks WHERE id = ?',
+        [req.params.id],
+        (err) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json({ success: true });
+        }
+    );
+});
+
+/* ================= START SERVER ================= */
+
+app.get('/api/notifications', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
+
+    try {
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, JWT_SECRET);
+
+        fluxNexusHandler.query(
+            'SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50',
+            [decoded.id],
+            (err, results) => {
+                if (err) return res.status(500).json({ error: 'Database error' });
+                res.json(results);
+            }
+        );
+    } catch (error) {
+        res.status(401).json({ error: 'Invalid token' });
+    }
+});
+
+app.put('/api/notifications/:id/read', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
+
+    fluxNexusHandler.query(
+        'UPDATE notifications SET read_status = TRUE WHERE id = ?',
+        [req.params.id],
+        (err) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json({ success: true });
+        }
+    );
+});
+
+/* ================= START SERVER ================= */
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

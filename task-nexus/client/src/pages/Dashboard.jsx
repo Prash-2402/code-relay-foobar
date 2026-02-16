@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { BarChart3, CheckCircle2, Clock, AlertTriangle, FolderKanban, Building2 } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, LabelList } from 'recharts';
 
-const API_BASE = import.meta.env.API_URL || 'http://localhost:5000/api';
+import API_BASE from '../config';
+
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
 export default function Dashboard() {
     const [stats, setStats] = useState(null);
@@ -19,7 +22,7 @@ export default function Dashboard() {
     }, []);
 
     if (loading) {
-        return <div className="page-loading"><div className="spinner"></div><p>Loading dashboard...</p></div>;
+        return <div className="page-loading"><div className="spinner"></div><p>Loading analytics...</p></div>;
     }
 
     const statCards = [
@@ -31,11 +34,25 @@ export default function Dashboard() {
         { label: 'Workspaces', value: stats?.totalWorkspaces || 0, icon: Building2, color: '#06B6D4' },
     ];
 
+    // Process data for Recharts
+    const statusData = stats?.tasksByStatus?.map(item => ({
+        name: item.status.replace('_', ' '),
+        value: item.count
+    })) || [];
+
+    const priorityData = stats?.tasksByPriority?.map(item => ({
+        name: item.priority,
+        count: item.count
+    })) || [];
+
     return (
         <div className="dashboard-page fade-in">
             <div className="page-header">
-                <h2>Dashboard</h2>
-                <p className="text-muted">Overview of your task management</p>
+                <div>
+                    <h2>Dashboard</h2>
+                    <p className="text-muted">Real-time overview of your workspace</p>
+                </div>
+                <div className="badge">Updated Now</div>
             </div>
 
             <div className="stats-grid">
@@ -53,48 +70,73 @@ export default function Dashboard() {
             </div>
 
             <div className="dashboard-charts">
+                {/* Status Distribution */}
                 <div className="chart-card glass">
-                    <h3>Tasks by Status</h3>
-                    <div className="chart-bars">
-                        {stats?.tasksByStatus?.map((item) => (
-                            <div key={item.status} className="chart-bar-row">
-                                <span className="chart-bar-label">{item.status?.replace('_', ' ')}</span>
-                                <div className="chart-bar-track">
-                                    <div className="chart-bar-fill" style={{
-                                        width: `${stats.totalTasks ? (item.count / stats.totalTasks) * 100 : 0}%`,
-                                        backgroundColor: '#3B82F6'
-                                    }}></div>
-                                </div>
-                                <span className="chart-bar-value">{item.count}</span>
-                            </div>
-                        ))}
-                        {(!stats?.tasksByStatus || stats.tasksByStatus.length === 0) && (
-                            <p className="text-muted" style={{ textAlign: 'center', padding: '2rem' }}>No tasks yet</p>
+                    <h3>Task Distribution</h3>
+                    <div style={{ width: '100%', height: 300 }}>
+                        {statusData.length > 0 ? (
+                            <ResponsiveContainer>
+                                <PieChart>
+                                    <Pie
+                                        data={statusData}
+                                        cx="50%"
+                                        cy="50%"
+                                        innerRadius={60}
+                                        outerRadius={80}
+                                        paddingAngle={5}
+                                        dataKey="value"
+                                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                    >
+                                        {statusData.map((entry, index) => (
+                                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                        ))}
+                                    </Pie>
+                                    <Tooltip
+                                        contentStyle={{ backgroundColor: 'var(--glass)', borderRadius: '8px', border: '1px solid var(--border)' }}
+                                        itemStyle={{ color: 'var(--text)' }}
+                                    />
+                                    <Legend />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        ) : (
+                            <div className="flex-center text-muted h-full">No task data available</div>
                         )}
                     </div>
                 </div>
 
+                {/* Priority Breakdown */}
                 <div className="chart-card glass">
                     <h3>Tasks by Priority</h3>
-                    <div className="chart-bars">
-                        {stats?.tasksByPriority?.map((item) => (
-                            <div key={item.priority} className="chart-bar-row">
-                                <span className="chart-bar-label">{item.priority}</span>
-                                <div className="chart-bar-track">
-                                    <div className="chart-bar-fill" style={{
-                                        width: `${stats.totalTasks ? (item.count / stats.totalTasks) * 100 : 0}%`,
-                                        backgroundColor: '#F59E0B'
-                                    }}></div>
-                                </div>
-                                <span className="chart-bar-value">{item.count}</span>
-                            </div>
-                        ))}
-                        {(!stats?.tasksByPriority || stats.tasksByPriority.length === 0) && (
-                            <p className="text-muted" style={{ textAlign: 'center', padding: '2rem' }}>No tasks yet</p>
+                    <div style={{ width: '100%', height: 300 }}>
+                        {priorityData.length > 0 ? (
+                            <ResponsiveContainer>
+                                <BarChart data={priorityData}>
+                                    <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} />
+                                    <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} />
+                                    <Tooltip
+                                        cursor={{ fill: 'var(--glass-hover)' }}
+                                        contentStyle={{ backgroundColor: 'var(--glass)', borderRadius: '8px', border: '1px solid var(--border)' }}
+                                        itemStyle={{ color: 'var(--text)' }}
+                                    />
+                                    <Bar dataKey="count" fill="#8884d8" radius={[4, 4, 0, 0]}>
+                                        {priorityData.map((entry, index) => (
+                                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                        ))}
+                                        <LabelList dataKey="count" position="top" fill="var(--text)" fontSize={12} />
+                                    </Bar>
+                                </BarChart>
+                            </ResponsiveContainer>
+                        ) : (
+                            <div className="flex-center text-muted h-full">No priority data available</div>
                         )}
                     </div>
                 </div>
             </div>
+
+            <style>{`
+                .flex-center { display: flex; align-items: center; justify-content: center; }
+                .h-full { height: 100%; }
+            `}</style>
         </div>
     );
 }
