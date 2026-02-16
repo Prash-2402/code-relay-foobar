@@ -66,7 +66,6 @@ app.post('/api/auth/register', async (req, res) => {
                     "INSERT INTO workspaces (name, description, owner_id) VALUES (?, ?, ?)",
                     [`${username} Workspace`, "Default workspace", userId],
                     (err2, wsResult) => {
-
                         const workspaceId = wsResult.insertId;
 
                         fluxNexusHandler.query(
@@ -239,10 +238,21 @@ app.post('/api/projects', authenticate, (req, res) => {
 
     fluxNexusHandler.query(
         "INSERT INTO projects (name, description, color, workspace_id) VALUES (?, ?, ?, ?)",
-        [name, description, color, workspaceId],
+        [name, description, color || "#3B82F6", workspaceId],
         (err, result) => {
             if (err) return res.status(500).json({ error: "DB error" });
             res.json({ id: result.insertId, name, description, color, workspace_id: workspaceId });
+        }
+    );
+});
+
+app.delete('/api/projects/:id', authenticate, (req, res) => {
+    fluxNexusHandler.query(
+        "DELETE FROM projects WHERE id = ?",
+        [req.params.id],
+        (err) => {
+            if (err) return res.status(500).json({ error: "DB error" });
+            res.json({ success: true });
         }
     );
 });
@@ -264,11 +274,44 @@ app.post('/api/tasks', authenticate, (req, res) => {
     const { title, description, priority, due_date, project_id } = req.body;
 
     fluxNexusHandler.query(
-        "INSERT INTO tasks (title, description, priority, due_date, project_id, created_by) VALUES (?, ?, ?, ?, ?, ?)",
-        [title, description, priority, due_date, project_id, req.user.id],
+        "INSERT INTO tasks (title, description, priority, due_date, project_id, status, completed, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [title, description, priority, due_date, project_id, "todo", false, req.user.id],
         (err, result) => {
             if (err) return res.status(500).json({ error: "DB error" });
-            res.json({ id: result.insertId, title, description, priority, due_date, project_id, status: "todo" });
+            res.json({
+                id: result.insertId,
+                title,
+                description,
+                priority,
+                due_date,
+                project_id,
+                status: "todo",
+                completed: false
+            });
+        }
+    );
+});
+
+app.put('/api/tasks/:id', authenticate, (req, res) => {
+    const { status, completed } = req.body;
+
+    fluxNexusHandler.query(
+        "UPDATE tasks SET status = ?, completed = ? WHERE id = ?",
+        [status, completed, req.params.id],
+        (err) => {
+            if (err) return res.status(500).json({ error: "DB error" });
+            res.json({ success: true });
+        }
+    );
+});
+
+app.delete('/api/tasks/:id', authenticate, (req, res) => {
+    fluxNexusHandler.query(
+        "DELETE FROM tasks WHERE id = ?",
+        [req.params.id],
+        (err) => {
+            if (err) return res.status(500).json({ error: "DB error" });
+            res.json({ success: true });
         }
     );
 });
