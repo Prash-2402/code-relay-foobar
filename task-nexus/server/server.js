@@ -154,20 +154,6 @@ app.get('/api/auth/me', (req, res) => {
 
 /* ================= NOTIFICATIONS ================= */
 
-app.get('/api/init-db', (req, res) => {
-    const fs = require('fs');
-    const path = require('path');
-
-    const sql = fs.readFileSync(path.join(__dirname, 'database_mysql.sql')).toString();
-
-    fluxNexusHandler.query(sql, (err) => {
-        if (err) {
-            console.error(err);
-            return res.status(500).json({ error: 'Failed to initialize DB' });
-        }
-        res.json({ message: 'Database initialized successfully' });
-    });
-});
 
 
 app.put('/api/notifications/:id/read', (req, res) => {
