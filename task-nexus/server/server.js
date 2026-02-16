@@ -246,6 +246,19 @@ app.post('/api/projects', authenticate, (req, res) => {
     );
 });
 
+app.get('/api/projects/:id', authenticate, (req, res) => {
+    fluxNexusHandler.query(
+        "SELECT * FROM projects WHERE id = ?",
+        [req.params.id],
+        (err, results) => {
+            if (err) return res.status(500).json({ error: "DB error" });
+            if (!results.length) return res.status(404).json({ error: "Project not found" });
+
+            res.json(results[0]);
+        }
+    );
+});
+
 app.delete('/api/projects/:id', authenticate, (req, res) => {
     fluxNexusHandler.query(
         "DELETE FROM projects WHERE id = ?",
